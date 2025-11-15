@@ -7,12 +7,10 @@ use std::{
 };
 
 use winit::{
-	event::{Event, WindowEvent},
-	event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
-	window::WindowId,
+	application::{self, ApplicationHandler as WinitApplicationHandler}, event::{self, Event, WindowEvent}, event_loop::{ActiveEventLoop as WinitActiveEventLoop, ControlFlow, EventLoop as WinitEventLoop, EventLoopBuilder, EventLoopProxy}, window::WindowId
 };
 
-use crate::{window::Window, NextUpdate};
+use crate::{NextUpdate, event_loop::{ActiveEventLoop, EventLoop}, window::Window};
 
 // const MAX_SLEEP_DURATION: std::time::Duration = std::time::Duration::from_millis(4);
 static EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -21,7 +19,7 @@ pub fn request_exit() {
 	EXIT_REQUESTED.store(true, Ordering::Relaxed);
 }
 
-fn set_control_flow<E>(event_loop: &EventLoopWindowTarget<E>, control_flow: ControlFlow) {
+fn set_control_flow(event_loop: &WinitActiveEventLoop, control_flow: ControlFlow) {
 	if let ControlFlow::WaitUntil(time) = control_flow {
 		let very_short_time_from_now = Instant::now() + Duration::from_micros(100);
 		if time < very_short_time_from_now {
@@ -35,7 +33,7 @@ fn set_control_flow<E>(event_loop: &EventLoopWindowTarget<E>, control_flow: Cont
 }
 
 /// Returns true if original was replaced by new
-fn aggregate_control_flow<E>(event_loop: &EventLoopWindowTarget<E>, new: ControlFlow) -> bool {
+fn aggregate_control_flow(event_loop: &WinitActiveEventLoop, new: ControlFlow) -> bool {
 	let original = event_loop.control_flow();
 	match new {
 		ControlFlow::Poll => {
@@ -66,156 +64,165 @@ fn aggregate_control_flow<E>(event_loop: &EventLoopWindowTarget<E>, new: Control
 ///
 /// We use this function to check if the time specified in WaitUntil has already
 /// been passed and if it is, then we change the control flow, to get "un-stuck"
-fn sanitize_control_flow<E>(event_loop: &EventLoopWindowTarget<E>) {
+fn sanitize_control_flow(event_loop: &WinitActiveEventLoop) {
 	set_control_flow(event_loop, event_loop.control_flow());
 }
 
-pub type EventHandler<UserEvent> = dyn FnMut(&Event<UserEvent>) -> NextUpdate;
+// pub type EventHandler<UserEvent> = dyn FnMut(&Event<UserEvent>) -> NextUpdate;
 
-pub struct Application<UserEvent>
-where
-	UserEvent: Debug + 'static,
-{
-	pub event_loop: EventLoop<UserEvent>,
+pub struct Application {
 	windows: HashMap<WindowId, Rc<Window>>,
-	global_handlers: Vec<Box<EventHandler<UserEvent>>>,
-	at_exit: Option<Box<dyn FnOnce()>>,
+	first_resume_done: bool,
 }
 
-impl<UserEvent> Application<UserEvent>
-where
-	UserEvent: Debug + 'static,
+impl Application
 {
 	pub fn new() -> Self {
 		Application {
-			event_loop: EventLoopBuilder::<UserEvent>::with_user_event().build().unwrap(),
 			windows: HashMap::new(),
-			global_handlers: Vec::new(),
-			at_exit: None,
+			first_resume_done: false,
 		}
 	}
 
-	pub fn set_at_exit<F: FnOnce() + 'static>(&mut self, fun: Option<F>) {
-		match fun {
-			Some(fun) => self.at_exit = Some(Box::new(fun)),
-			None => self.at_exit = None,
-		};
-	}
-
-	pub fn register_window(&mut self, window: Rc<Window>) {
+	pub(crate) fn register_window(&mut self, window: Rc<Window>) {
 		self.windows.insert(window.get_id(), window);
 	}
 
-	pub fn add_global_event_handler<F: FnMut(&Event<UserEvent>) -> NextUpdate + 'static>(
-		&mut self,
-		fun: F,
-	) {
-		self.global_handlers.push(Box::new(fun));
-	}
+	pub fn start_event_loop<UserEvent: Debug + 'static>(&mut self, application_handler: impl ApplicationHandler, event_loop: EventLoop<UserEvent>) {
+		#[cfg(feature = "benchmark")]
+		let mut update_draw_dt = {
+			let mut last_draw_time = std::time::Instant::now();
+			let mut prev_draw_dts = vec![0f32; 64];
+			let mut prev_draw_dt_index = 0;
 
-	pub fn create_loop_proxy(&self) -> EventLoopProxy<UserEvent> {
-		self.event_loop.create_proxy()
-	}
-
-	pub fn start_event_loop(self) {
-		let mut windows: HashMap<WindowId, Rc<Window>> = self.windows;
-		let mut at_exit = self.at_exit;
-		let mut global_handlers = self.global_handlers;
-		#[cfg(feature = "benchmark")]
-		let mut last_draw_time = std::time::Instant::now();
-		#[cfg(feature = "benchmark")]
-		let mut prev_draw_dts = vec![0f32; 64];
-		#[cfg(feature = "benchmark")]
-		let mut prev_draw_dt_index = 0;
-		#[cfg(feature = "benchmark")]
-		let mut update_draw_dt = move || {
-			let now = std::time::Instant::now();
-			let delta_time = now.duration_since(last_draw_time).as_secs_f32();
-			last_draw_time = now;
-			prev_draw_dts[prev_draw_dt_index] = delta_time;
-			prev_draw_dt_index = (prev_draw_dt_index + 1) % prev_draw_dts.len();
-			if prev_draw_dt_index == 0 {
-				let max_dt = prev_draw_dts.iter().fold(0.0f32, |a, &b| a.max(b));
-				println!(
-					"{} redraws finsished, max delta time in that duration was: {}ms, {} FPS",
-					prev_draw_dts.len(),
-					(max_dt * 1000.0).round() as i32,
-					(1.0 / max_dt).round() as i32
-				);
+			move || {
+				let now = std::time::Instant::now();
+				let delta_time = now.duration_since(last_draw_time).as_secs_f32();
+				last_draw_time = now;
+				prev_draw_dts[prev_draw_dt_index] = delta_time;
+				prev_draw_dt_index = (prev_draw_dt_index + 1) % prev_draw_dts.len();
+				if prev_draw_dt_index == 0 {
+					let max_dt = prev_draw_dts.iter().fold(0.0f32, |a, &b| a.max(b));
+					println!(
+						"{} redraws finsished, max delta time in that duration was: {}ms, {} FPS",
+						prev_draw_dts.len(),
+						(max_dt * 1000.0).round() as i32,
+						(1.0 / max_dt).round() as i32
+					);
+				}
 			}
 		};
 
-		self.event_loop
-			.run(move |event, event_loop| {
-				sanitize_control_flow(event_loop);
-				for handler in global_handlers.iter_mut() {
-					let handler_next_update = handler(&event);
-					aggregate_control_flow(event_loop, handler_next_update.into());
-				}
-				// dbg!(&event);
-				match event {
-					Event::NewEvents(_) => {
-						event_loop.set_control_flow(ControlFlow::Wait);
-						for window in windows.values() {
-							let new_control_flow = window.handle_loop_wake_up().into();
-							aggregate_control_flow(event_loop, new_control_flow);
-						}
-					}
-					Event::WindowEvent { event, window_id } => {
-						if let WindowEvent::RedrawRequested = event {
-							let new_control_flow = windows.get(&window_id).unwrap().redraw().into();
-							aggregate_control_flow(event_loop, new_control_flow);
-							#[cfg(feature = "benchmark")]
-							update_draw_dt();
-						}
-						if let WindowEvent::CloseRequested = event {
-							// This actually wouldn't be okay for a general pupose ui toolkit,
-							// but gelatin is specifically made for emulsion so this is fine hehe
-							request_exit();
-						}
-						let destroyed;
-						if let WindowEvent::Destroyed = event {
-							destroyed = true;
-						} else {
-							destroyed = false;
-						}
-						windows.get(&window_id).unwrap().process_event(event, event_loop);
-						if destroyed {
-							windows.remove(&window_id);
-						}
-					}
-					Event::AboutToWait => {
-						if EXIT_REQUESTED.load(Ordering::Relaxed) {
-							event_loop.exit();
-							return;
-						}
-						for window in windows.values() {
-							window.main_events_cleared();
-							if window.redraw_needed() {
-								window.request_redraw();
-							}
-						}
-						// event_loop.set_control_flow(ControlFlow::Wait);
-					}
-					Event::LoopExiting => {
-						if let Some(at_exit) = at_exit.take() {
-							at_exit();
-						}
-					}
-					event => {
-						log::trace!("Ignoring event: {event:?}");
-					}
-				}
-			})
-			.unwrap();
+		let mut app_with_app_handler = AppWithAppHandler {
+			application: self,
+			application_handler,
+		};
+
+		event_loop.inner.run_app(&mut app_with_app_handler).unwrap();
 	}
 }
 
-impl<UserEvent> Default for Application<UserEvent>
+
+struct AppWithAppHandler<'a, AppHandler>
+where
+	AppHandler: ApplicationHandler,
+{
+	application: &'a mut Application,
+	application_handler: AppHandler,
+}
+
+
+pub trait ApplicationHandler {
+
+	fn handle_can_create_surface(&mut self, event_loop: &mut ActiveEventLoop);
+	fn handle_window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: &WindowEvent) -> NextUpdate;
+
+	// fn resumed(&mut self, event_loop: &ActiveEventLoop<UserEvent>);
+	// fn about_to_wait(&mut self, event_loop: &ActiveEventLoop<UserEvent>);
+
+    fn exiting(&mut self);
+}
+
+
+impl<'a, UserEvent, AppHandler> WinitApplicationHandler<UserEvent> for AppWithAppHandler<'a, AppHandler>
 where
 	UserEvent: Debug + 'static,
+	AppHandler: ApplicationHandler,
 {
-	fn default() -> Self {
-		Self::new()
+	fn resumed(&mut self, event_loop: &WinitActiveEventLoop) {
+		if !self.application.first_resume_done {
+			self.application.first_resume_done = true;
+			let mut active_event_loop = ActiveEventLoop {
+				inner: event_loop,
+				application: self.application,
+			};
+			self.application_handler.handle_can_create_surface(&mut active_event_loop);
+		}
+	}
+
+	fn about_to_wait(&mut self, event_loop: &WinitActiveEventLoop) {
+		if EXIT_REQUESTED.load(Ordering::Relaxed) {
+			event_loop.exit();
+			return;
+		}
+		for window in self.application.windows.values() {
+			window.main_events_cleared();
+			if window.redraw_needed() {
+				window.request_redraw();
+			}
+		}
+	}
+
+	fn exiting(&mut self, _event_loop: &WinitActiveEventLoop) {
+		self.application_handler.exiting();
+	}
+	
+	fn new_events(&mut self, event_loop: &WinitActiveEventLoop, _cause: event::StartCause) {
+		event_loop.set_control_flow(ControlFlow::Wait);
+		for window in self.application.windows.values() {
+			let new_control_flow = window.handle_loop_wake_up().into();
+			aggregate_control_flow(event_loop, new_control_flow);
+		}
+	}
+
+	fn window_event(
+		&mut self,
+		event_loop: &WinitActiveEventLoop,
+		window_id: WindowId,
+		event: WindowEvent,
+	) {
+		sanitize_control_flow(event_loop);
+		
+		let handler_next_update = self.application_handler.handle_window_event(
+			&ActiveEventLoop {
+				inner: event_loop,
+				application: self.application,
+			},
+			window_id,
+			&event,
+		);
+		aggregate_control_flow(event_loop, handler_next_update.into());
+
+		if let WindowEvent::RedrawRequested = event {
+			let new_control_flow = self.application.windows.get(&window_id).unwrap().redraw().into();
+			aggregate_control_flow(event_loop, new_control_flow);
+			#[cfg(feature = "benchmark")]
+			update_draw_dt();
+		}
+		if let WindowEvent::CloseRequested = event {
+			// This actually wouldn't be okay for a general pupose ui toolkit,
+			// but gelatin is specifically made for emulsion so this is fine hehe
+			request_exit();
+		}
+		let destroyed;
+		if let WindowEvent::Destroyed = event {
+			destroyed = true;
+		} else {
+			destroyed = false;
+		}
+		self.application.windows.get(&window_id).unwrap().process_event::<UserEvent>(event, event_loop);
+		if destroyed {
+			self.application.windows.remove(&window_id);
+		}
 	}
 }

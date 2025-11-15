@@ -2,6 +2,7 @@ use crate::Version;
 use clap::{parser::ValueSource, value_parser, Arg, Command};
 use std::path::Path;
 
+#[derive(Clone)]
 pub struct Args {
 	pub file_path: Option<String>,
 	pub displayed_folders: Option<u32>,

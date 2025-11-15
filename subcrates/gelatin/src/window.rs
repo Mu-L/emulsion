@@ -11,13 +11,13 @@ use glium::{
 	VertexBuffer,
 };
 use log::{debug, error, warn};
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
 use winit::{
 	dpi::{PhysicalPosition, PhysicalSize},
 	event::WindowEvent,
-	event_loop::{EventLoop, EventLoopWindowTarget},
+	event_loop::{ActiveEventLoop, EventLoop},
 	keyboard::ModifiersState,
-	window::{CursorIcon, Fullscreen, Icon, WindowBuilder, WindowId},
+	window::{self, CursorIcon, Fullscreen, Icon, WindowAttributes, WindowId},
 };
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -126,23 +126,23 @@ impl<'a> DerefMut for WinitWindowRefMut<'a> {
 #[builder(setter(into))]
 pub struct WindowDescriptor {
 	#[builder(default)]
-	icon: Option<Icon>,
+	pub icon: Option<Icon>,
 
 	#[builder(default = "PhysicalSize::<u32>::new(800, 600)")]
-	size: PhysicalSize<u32>,
+	pub size: PhysicalSize<u32>,
 
 	/// If true, then `position` and `size` are ignored
 	#[builder(default)]
-	maximized: bool,
+	pub maximized: bool,
 
 	#[builder(default)]
-	position: Option<PhysicalPosition<i32>>,
+	pub position: Option<PhysicalPosition<i32>>,
 
 	/// Only relevant on Wayland.
 	/// See: https://docs.rs/winit/0.24.0/winit/platform/unix/trait.WindowBuilderExtUnix.html#tymethod.with_app_id
 	#[builder(default)]
 	#[allow(dead_code)]
-	app_id: Option<String>,
+	pub app_id: Option<String>,
 }
 
 pub type EventHandler = dyn FnMut(&Window, &WindowEvent);
@@ -191,13 +191,12 @@ impl PartialEq for Window {
 impl Eq for Window {}
 
 impl Window {
-	pub fn new<UserEvent: Debug>(
-		application: &mut Application<UserEvent>,
+	/// Call ActiveEventLoop::create_window instead of this directly.
+	pub fn new(
+		application: &mut Application,
 		mut desc: WindowDescriptor,
-	) -> Rc<Self> {
-		//use glium::glutin::window::Icon;
-		//let exe_parent = std::env::current_exe().unwrap().parent().unwrap().to_owned();
-
+		event_loop: &winit::event_loop::ActiveEventLoop
+	) -> Result<Rc<Self>, Box<dyn std::error::Error>> {
 		const MINIMUM_WINDOW_SIZE: u32 = 200;
 		if desc.size.width < MINIMUM_WINDOW_SIZE {
 			warn!("Window width was specified to be zero. Defaulting to {MINIMUM_WINDOW_SIZE} instead");
@@ -208,46 +207,47 @@ impl Window {
 			desc.size.height = MINIMUM_WINDOW_SIZE;
 		}
 
-		let mut window_builder = WindowBuilder::new()
-			.with_title("Loading")
-			.with_fullscreen(None)
-			.with_window_icon(desc.icon)
-			.with_maximized(desc.maximized);
+		let mut window_attributes = winit::window::WindowAttributes::default();
+        window_attributes.inner_size = Some(desc.size.into());
+		window_attributes.title = "Loading".into();	
+		window_attributes.fullscreen = None;
+		window_attributes.window_icon = desc.icon;
+		window_attributes.maximized = desc.maximized;
 
 		if !desc.maximized {
-			window_builder = window_builder.with_inner_size(desc.size);
+			window_attributes.inner_size = Some(desc.size.into());
 			if let Some(window_pos) = desc.position {
 				// Check if the window would be placed outside of the screen
 				// (This can happen when using two displays, then disconnecting
 				// one of the displays and starting up emulsion)
-				let in_bounds = application.event_loop.available_monitors().any(|monitor| {
+				let in_bounds = event_loop.available_monitors().any(|monitor| {
 					debug!("Monitor pos: {:?}", monitor.position());
 					debug!("Monitor size: {:?}", monitor.size());
 					is_in_bounds(monitor.position(), monitor.size(), window_pos)
 				});
 				if in_bounds {
-					window_builder = window_builder.with_position(window_pos);
+					window_attributes.position = Some(window_pos.into());
 				}
 			}
 		}
 
 		#[cfg(not(any(target_os = "macos", windows)))]
-		let window_builder = if let Some(app_id) = desc.app_id {
+		let window_attributes = if let Some(app_id) = desc.app_id {
 			let is_wayland = std::env::var("XDG_SESSION_TYPE")
 				.map_or(false, |var| var.to_lowercase().contains("wayland"));
 			if is_wayland {
-				WindowBuilderExtWayland::with_name(window_builder, &app_id, app_id.to_lowercase())
+				WindowAttributesExtWayland::with_name(window_attributes, &app_id, app_id.to_lowercase())
 			} else {
-				WindowBuilderExtX11::with_name(window_builder, &app_id, app_id.to_lowercase())
+				WindowAttributesExtX11::with_name(window_attributes, &app_id, app_id.to_lowercase())
 			}
 		} else {
-			window_builder
+			window_attributes
 		};
 
 		// let window = window.build(&application.event_loop).unwrap();
-		let (window, display) = Self::build_winit_window(window_builder, &application.event_loop);
+		let (window, display) = Self::build_winit_window(window_attributes, event_loop);
 
-		window.set_cursor_icon(CursorIcon::Default);
+		window.set_cursor(CursorIcon::Default);
 
 		// All the draw stuff
 		use glium::index::PrimitiveType;
@@ -329,19 +329,19 @@ impl Window {
 		});
 
 		application.register_window(resulting_window.clone());
-		resulting_window
+		Ok(resulting_window)
 	}
 
 	/// This is mostly copy-pasted from `glutin::SimpleWindowBuilder::build`
 	/// but I use some custom configuration settings here
-	fn build_winit_window<UserEvent>(
-		builder: WindowBuilder,
-		event_loop: &EventLoop<UserEvent>,
+	fn build_winit_window(
+		attributes: WindowAttributes,
+		event_loop: &ActiveEventLoop,
 	) -> (winit::window::Window, Display<WindowSurface>) {
 		// let is_maximized = builder.m
 		// First we start by opening a new Window
 		let display_builder =
-			glutin_winit::DisplayBuilder::new().with_window_builder(Some(builder));
+			glutin_winit::DisplayBuilder::new().with_window_attributes(Some(attributes));
 
 		let config_template_builder = glutin::config::ConfigTemplateBuilder::new()
 			.prefer_hardware_accelerated(Some(true))
@@ -362,13 +362,15 @@ impl Window {
 			.unwrap();
 		let window = window.unwrap();
 
+		let raw_window_handle = window.window_handle().unwrap().as_raw();
+
 		// Now we get the window size to use as the initial size of the Surface
 		let (width, height): (u32, u32) = window.inner_size().into();
 		let attrs =
 			glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
 				.with_srgb(Some(true))
 				.build(
-					window.raw_window_handle(),
+					raw_window_handle,
 					NonZeroU32::new(width).unwrap(),
 					NonZeroU32::new(height).unwrap(),
 				);
@@ -381,7 +383,7 @@ impl Window {
 			.with_profile(GlProfile::Core) // requires OpenGL 3.3
 			.with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
 			.with_release_behavior(glutin::context::ReleaseBehavior::None)
-			.build(Some(window.raw_window_handle()));
+			.build(Some(raw_window_handle));
 		let current_context = unsafe {
 			gl_config
 				.display()
@@ -429,7 +431,7 @@ impl Window {
 		&self,
 		native_event: WindowEvent,
 		// allowing event_loop to be unused because it's only used on some platforms
-		#[allow(unused_variables)] event_loop: &EventLoopWindowTarget<UserEvent>,
+		#[allow(unused_variables)] event_loop: &ActiveEventLoop,
 	) {
 		use winit::event::MouseScrollDelta;
 

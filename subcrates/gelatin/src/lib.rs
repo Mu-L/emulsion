@@ -32,6 +32,7 @@ pub mod picture;
 pub mod shaders;
 pub mod slider;
 pub mod window;
+pub mod event_loop;
 
 pub type Display = glium::Display<WindowSurface>;
 
