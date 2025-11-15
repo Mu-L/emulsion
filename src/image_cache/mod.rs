@@ -126,8 +126,6 @@ pub struct AnimationFrameTexture {
 	/// of the cell at the 3rd column and 2nd row is
 	/// (3*cell_step_size, 2*cell_step_size)
 	pub cell_step_size: u32,
-	pub grid_rows: u32,
-	pub grid_cols: u32,
 
 	pub delay_nano: u64,
 	pub orientation: Orientation,
@@ -184,8 +182,6 @@ impl AnimationFrameTexture {
 			w,
 			h,
 			cell_step_size: max_size,
-			grid_rows,
-			grid_cols,
 		})
 	}
 

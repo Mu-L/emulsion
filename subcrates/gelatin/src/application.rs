@@ -7,10 +7,19 @@ use std::{
 };
 
 use winit::{
-	application::{self, ApplicationHandler as WinitApplicationHandler}, event::{self, Event, WindowEvent}, event_loop::{ActiveEventLoop as WinitActiveEventLoop, ControlFlow, EventLoop as WinitEventLoop, EventLoopBuilder, EventLoopProxy}, window::WindowId
+	application::{ApplicationHandler as WinitApplicationHandler},
+	event::{self, WindowEvent},
+	event_loop::{
+		ActiveEventLoop as WinitActiveEventLoop, ControlFlow
+	},
+	window::WindowId,
 };
 
-use crate::{NextUpdate, event_loop::{ActiveEventLoop, EventLoop}, window::Window};
+use crate::{
+	event_loop::{ActiveEventLoop, EventLoop},
+	window::Window,
+	NextUpdate,
+};
 
 // const MAX_SLEEP_DURATION: std::time::Duration = std::time::Duration::from_millis(4);
 static EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -75,20 +84,20 @@ pub struct Application {
 	first_resume_done: bool,
 }
 
-impl Application
-{
+impl Application {
 	pub fn new() -> Self {
-		Application {
-			windows: HashMap::new(),
-			first_resume_done: false,
-		}
+		Application { windows: HashMap::new(), first_resume_done: false }
 	}
 
 	pub(crate) fn register_window(&mut self, window: Rc<Window>) {
 		self.windows.insert(window.get_id(), window);
 	}
 
-	pub fn start_event_loop<UserEvent: Debug + 'static>(&mut self, application_handler: impl ApplicationHandler, event_loop: EventLoop<UserEvent>) {
+	pub fn start_event_loop<UserEvent: Debug + 'static>(
+		&mut self,
+		application_handler: impl ApplicationHandler,
+		event_loop: EventLoop<UserEvent>,
+	) {
 		#[cfg(feature = "benchmark")]
 		let mut update_draw_dt = {
 			let mut last_draw_time = std::time::Instant::now();
@@ -113,15 +122,11 @@ impl Application
 			}
 		};
 
-		let mut app_with_app_handler = AppWithAppHandler {
-			application: self,
-			application_handler,
-		};
+		let mut app_with_app_handler = AppWithAppHandler { application: self, application_handler };
 
 		event_loop.inner.run_app(&mut app_with_app_handler).unwrap();
 	}
 }
-
 
 struct AppWithAppHandler<'a, AppHandler>
 where
@@ -131,20 +136,23 @@ where
 	application_handler: AppHandler,
 }
 
-
 pub trait ApplicationHandler {
-
 	fn handle_can_create_surface(&mut self, event_loop: &mut ActiveEventLoop);
-	fn handle_window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: &WindowEvent) -> NextUpdate;
+	fn handle_window_event(
+		&mut self,
+		event_loop: &ActiveEventLoop,
+		window_id: WindowId,
+		event: &WindowEvent,
+	) -> NextUpdate;
 
 	// fn resumed(&mut self, event_loop: &ActiveEventLoop<UserEvent>);
 	// fn about_to_wait(&mut self, event_loop: &ActiveEventLoop<UserEvent>);
 
-    fn exiting(&mut self);
+	fn exiting(&mut self);
 }
 
-
-impl<'a, UserEvent, AppHandler> WinitApplicationHandler<UserEvent> for AppWithAppHandler<'a, AppHandler>
+impl<'a, UserEvent, AppHandler> WinitApplicationHandler<UserEvent>
+	for AppWithAppHandler<'a, AppHandler>
 where
 	UserEvent: Debug + 'static,
 	AppHandler: ApplicationHandler,
@@ -152,10 +160,8 @@ where
 	fn resumed(&mut self, event_loop: &WinitActiveEventLoop) {
 		if !self.application.first_resume_done {
 			self.application.first_resume_done = true;
-			let mut active_event_loop = ActiveEventLoop {
-				inner: event_loop,
-				application: self.application,
-			};
+			let mut active_event_loop =
+				ActiveEventLoop { inner: event_loop, application: self.application };
 			self.application_handler.handle_can_create_surface(&mut active_event_loop);
 		}
 	}
@@ -176,7 +182,7 @@ where
 	fn exiting(&mut self, _event_loop: &WinitActiveEventLoop) {
 		self.application_handler.exiting();
 	}
-	
+
 	fn new_events(&mut self, event_loop: &WinitActiveEventLoop, _cause: event::StartCause) {
 		event_loop.set_control_flow(ControlFlow::Wait);
 		for window in self.application.windows.values() {
@@ -192,19 +198,17 @@ where
 		event: WindowEvent,
 	) {
 		sanitize_control_flow(event_loop);
-		
+
 		let handler_next_update = self.application_handler.handle_window_event(
-			&ActiveEventLoop {
-				inner: event_loop,
-				application: self.application,
-			},
+			&ActiveEventLoop { inner: event_loop, application: self.application },
 			window_id,
 			&event,
 		);
 		aggregate_control_flow(event_loop, handler_next_update.into());
 
 		if let WindowEvent::RedrawRequested = event {
-			let new_control_flow = self.application.windows.get(&window_id).unwrap().redraw().into();
+			let new_control_flow =
+				self.application.windows.get(&window_id).unwrap().redraw().into();
 			aggregate_control_flow(event_loop, new_control_flow);
 			#[cfg(feature = "benchmark")]
 			update_draw_dt();
@@ -220,7 +224,11 @@ where
 		} else {
 			destroyed = false;
 		}
-		self.application.windows.get(&window_id).unwrap().process_event::<UserEvent>(event, event_loop);
+		self.application
+			.windows
+			.get(&window_id)
+			.unwrap()
+			.process_event::<UserEvent>(event, event_loop);
 		if destroyed {
 			self.application.windows.remove(&window_id);
 		}

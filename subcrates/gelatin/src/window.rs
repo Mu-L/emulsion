@@ -15,9 +15,9 @@ use raw_window_handle::HasWindowHandle;
 use winit::{
 	dpi::{PhysicalPosition, PhysicalSize},
 	event::WindowEvent,
-	event_loop::{ActiveEventLoop, EventLoop},
+	event_loop::{ActiveEventLoop},
 	keyboard::ModifiersState,
-	window::{self, CursorIcon, Fullscreen, Icon, WindowAttributes, WindowId},
+	window::{CursorIcon, Fullscreen, Icon, WindowAttributes, WindowId},
 };
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -195,7 +195,7 @@ impl Window {
 	pub fn new(
 		application: &mut Application,
 		mut desc: WindowDescriptor,
-		event_loop: &winit::event_loop::ActiveEventLoop
+		event_loop: &winit::event_loop::ActiveEventLoop,
 	) -> Result<Rc<Self>, Box<dyn std::error::Error>> {
 		const MINIMUM_WINDOW_SIZE: u32 = 200;
 		if desc.size.width < MINIMUM_WINDOW_SIZE {
@@ -208,8 +208,8 @@ impl Window {
 		}
 
 		let mut window_attributes = winit::window::WindowAttributes::default();
-        window_attributes.inner_size = Some(desc.size.into());
-		window_attributes.title = "Loading".into();	
+		window_attributes.inner_size = Some(desc.size.into());
+		window_attributes.title = "Loading".into();
 		window_attributes.fullscreen = None;
 		window_attributes.window_icon = desc.icon;
 		window_attributes.maximized = desc.maximized;
@@ -236,7 +236,11 @@ impl Window {
 			let is_wayland = std::env::var("XDG_SESSION_TYPE")
 				.map_or(false, |var| var.to_lowercase().contains("wayland"));
 			if is_wayland {
-				WindowAttributesExtWayland::with_name(window_attributes, &app_id, app_id.to_lowercase())
+				WindowAttributesExtWayland::with_name(
+					window_attributes,
+					&app_id,
+					app_id.to_lowercase(),
+				)
 			} else {
 				WindowAttributesExtX11::with_name(window_attributes, &app_id, app_id.to_lowercase())
 			}

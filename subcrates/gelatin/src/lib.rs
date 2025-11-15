@@ -25,6 +25,7 @@ use misc::*;
 
 pub mod application;
 pub mod button;
+pub mod event_loop;
 pub mod label;
 pub mod line_layout_container;
 pub mod misc;
@@ -32,7 +33,6 @@ pub mod picture;
 pub mod shaders;
 pub mod slider;
 pub mod window;
-pub mod event_loop;
 
 pub type Display = glium::Display<WindowSurface>;
 

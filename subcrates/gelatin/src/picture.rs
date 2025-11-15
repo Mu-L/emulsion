@@ -86,7 +86,7 @@ impl Picture {
 		Ok(PictureMetadata { width: dimensions.0, height: dimensions.1 })
 	}
 
-	pub fn texture<F: Facade>(&self, facade: &F) -> Result<PictureTextureRef, ImageError> {
+	pub fn texture<F: Facade>(&self, facade: &F) -> Result<PictureTextureRef<'_>, ImageError> {
 		self.upload_to_texture(facade)?;
 		if let PictureData::Gpu(_) = &*self.data.borrow() {
 			Ok(PictureTextureRef { pic_data: self.data.borrow() })

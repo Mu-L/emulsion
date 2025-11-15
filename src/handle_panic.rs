@@ -10,7 +10,7 @@ use backtrace::Backtrace;
 
 use crate::PROJECT_DIRS;
 
-pub fn handle_panic(info: &panic::PanicInfo) {
+pub fn handle_panic(info: &panic::PanicHookInfo) {
 	let trace = Backtrace::new();
 
 	let mut msg = String::new();

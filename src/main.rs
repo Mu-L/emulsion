@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use directories_next::ProjectDirs;
 use gelatin::application::ApplicationHandler;
 use gelatin::event_loop::{self, ActiveEventLoop};
-use gelatin::winit::event_loop::ControlFlow;
+
 use lazy_static::lazy_static;
 
 use log::{debug, trace};
@@ -123,11 +123,9 @@ fn main() {
 	application.start_event_loop(app_handler, event_loop);
 }
 
-
 struct UiElements {
 	set_theme: Rc<dyn Fn()>,
 
-	update_label: Rc<Label>,
 	update_notification: Rc<HorizontalLayoutContainer>,
 	help_screen: Rc<HelpScreen>,
 }
@@ -150,7 +148,14 @@ struct AppHandler {
 }
 
 impl AppHandler {
-	fn create_window(&mut self, event_loop: &mut ActiveEventLoop, args: cmd_line::Args, first_launch: bool, cache: Arc<Mutex<Cache>>, config: Rc<RefCell<Configuration>>) -> Option<JoinHandle<()>> {
+	fn create_window(
+		&mut self,
+		event_loop: &mut ActiveEventLoop,
+		args: cmd_line::Args,
+		first_launch: bool,
+		cache: Arc<Mutex<Cache>>,
+		config: Rc<RefCell<Configuration>>,
+	) -> Option<JoinHandle<()>> {
 		let window: Rc<Window> = {
 			let window_cache = &mut cache.lock().unwrap().window;
 			let window_cfg = &config.borrow().window;
@@ -187,7 +192,7 @@ impl AppHandler {
 				.app_id(Some("Emulsion".into()))
 				.build()
 				.unwrap();
-			
+
 			let window = event_loop.create_window(window_desc).unwrap();
 
 			if let Some(ConfigWindowSection { start_fullscreen: Some(true), .. }) = window_cfg {
@@ -213,13 +218,13 @@ impl AppHandler {
 
 		let bottom_bar = Rc::new(BottomBar::new(&config.borrow()));
 		let picture_widget = make_picture_widget(
-				&window,
-				bottom_bar.clone(),
-				left_to_pan_hint.clone(),
-				copy_notifications,
-				config.clone(),
-				cache.clone(),
-			);
+			&window,
+			bottom_bar.clone(),
+			left_to_pan_hint.clone(),
+			copy_notifications,
+			config.clone(),
+			cache.clone(),
+		);
 
 		if let Some(file_path) = &args.file_path {
 			picture_widget.jump_to_path(file_path);
@@ -240,124 +245,121 @@ impl AppHandler {
 		self.update_check_done = Arc::new(AtomicBool::new(false));
 
 		let theme = {
-				Rc::new(Cell::new(match &config.borrow().window {
-					Some(ConfigWindowSection { theme: Some(theme_cfg), .. }) => *theme_cfg,
-					_ => cache.lock().unwrap().theme(),
-				}))
-			};
+			Rc::new(Cell::new(match &config.borrow().window {
+				Some(ConfigWindowSection { theme: Some(theme_cfg), .. }) => *theme_cfg,
+				_ => cache.lock().unwrap().theme(),
+			}))
+		};
 
 		let set_theme = {
-				let update_label = update_label.clone();
-				let picture_widget = picture_widget.clone();
-				let update_notification = update_notification.clone();
-				let window = window.clone();
-				let theme = theme.clone();
-				let update_available = self.update_available.clone();
-				let bottom_bar = bottom_bar.clone();
+			let update_label = update_label.clone();
+			let picture_widget = picture_widget.clone();
+			let update_notification = update_notification.clone();
+			let window = window.clone();
+			let theme = theme.clone();
+			let update_available = self.update_available.clone();
+			let bottom_bar = bottom_bar.clone();
 
-				Rc::new(move || {
-					match theme.get() {
-						Theme::Light => {
-							picture_widget.set_bright_shade(0.96);
-							window.set_bg_color([0.85, 0.85, 0.85, 1.0]);
-							update_notification.set_bg_color([0.06, 0.06, 0.06, 1.0]);
-							update_label.set_icon(Some(update_label_image_light.clone()));
-						}
-						Theme::Dark => {
-							picture_widget.set_bright_shade(0.11);
-							window.set_bg_color([0.03, 0.03, 0.03, 1.0]);
-							update_notification.set_bg_color([0.85, 0.85, 0.85, 1.0]);
-							update_label.set_icon(Some(update_label_image.clone()));
-						}
+			Rc::new(move || {
+				match theme.get() {
+					Theme::Light => {
+						picture_widget.set_bright_shade(0.96);
+						window.set_bg_color([0.85, 0.85, 0.85, 1.0]);
+						update_notification.set_bg_color([0.06, 0.06, 0.06, 1.0]);
+						update_label.set_icon(Some(update_label_image_light.clone()));
 					}
-					bottom_bar.set_theme(theme.get(), update_available.load(Ordering::SeqCst));
-				})
-			};
+					Theme::Dark => {
+						picture_widget.set_bright_shade(0.11);
+						window.set_bg_color([0.03, 0.03, 0.03, 1.0]);
+						update_notification.set_bg_color([0.85, 0.85, 0.85, 1.0]);
+						update_label.set_icon(Some(update_label_image.clone()));
+					}
+				}
+				bottom_bar.set_theme(theme.get(), update_available.load(Ordering::SeqCst));
+			})
+		};
 		set_theme();
 		{
-				let cache = cache.clone();
-				let set_theme = set_theme.clone();
-				bottom_bar.theme_button.set_on_click(move || {
-					let new_theme = theme.get().switch_theme();
-					theme.set(new_theme);
-					cache.lock().unwrap().set_theme(new_theme);
-					set_theme();
-				});
-			}
+			let cache = cache.clone();
+			let set_theme = set_theme.clone();
+			bottom_bar.theme_button.set_on_click(move || {
+				let new_theme = theme.get().switch_theme();
+				theme.set(new_theme);
+				cache.lock().unwrap().set_theme(new_theme);
+				set_theme();
+			});
+		}
 		{
-				let slider = bottom_bar.slider.clone();
-				let picture_widget = picture_widget.clone();
-				bottom_bar.slider.set_on_value_change(move || {
-					picture_widget.jump_to_index(slider.value());
-				});
-			}
+			let slider = bottom_bar.slider.clone();
+			let picture_widget = picture_widget.clone();
+			bottom_bar.slider.set_on_value_change(move || {
+				picture_widget.jump_to_index(slider.value());
+			});
+		}
 		{
-				let picture_widget = picture_widget.clone();
-				bottom_bar.orig_scale_button.set_on_click(move || {
-					picture_widget.set_img_size_to_orig();
-				});
-			}
+			let picture_widget = picture_widget.clone();
+			bottom_bar.orig_scale_button.set_on_click(move || {
+				picture_widget.set_img_size_to_orig();
+			});
+		}
 		{
-				let picture_widget = picture_widget.clone();
-				bottom_bar.fit_best_button.set_on_click(move || {
-					picture_widget.set_img_size_to_fit(false);
-				});
-			}
+			let picture_widget = picture_widget.clone();
+			bottom_bar.fit_best_button.set_on_click(move || {
+				picture_widget.set_img_size_to_fit(false);
+			});
+		}
 		{
-				bottom_bar.fit_stretch_button.set_on_click(move || {
-					picture_widget.set_img_size_to_fit(true);
-				});
-			}
+			bottom_bar.fit_stretch_button.set_on_click(move || {
+				picture_widget.set_img_size_to_fit(true);
+			});
+		}
 		let help_visible = Cell::new(first_launch);
 		help_screen.set_visible(help_visible.get());
-		update_notification.set_visible(help_visible.get() && self.update_available.load(Ordering::SeqCst));
+		update_notification
+			.set_visible(help_visible.get() && self.update_available.load(Ordering::SeqCst));
 		{
-				let update_available = self.update_available.clone();
-				let help_screen = help_screen.clone();
-				let update_notification = update_notification.clone();
-				let bottom_bar_clone = bottom_bar.clone();
+			let update_available = self.update_available.clone();
+			let help_screen = help_screen.clone();
+			let update_notification = update_notification.clone();
+			let bottom_bar_clone = bottom_bar.clone();
 
-				bottom_bar.help_button.set_on_click(move || {
-					help_visible.set(!help_visible.get());
-					help_screen.set_visible(help_visible.get());
-					bottom_bar_clone.set_help_visible(help_visible.get());
-					update_notification
-						.set_visible(help_visible.get() && update_available.load(Ordering::SeqCst));
-				});
-			}
+			bottom_bar.help_button.set_on_click(move || {
+				help_visible.set(!help_visible.get());
+				help_screen.set_visible(help_visible.get());
+				bottom_bar_clone.set_help_visible(help_visible.get());
+				update_notification
+					.set_visible(help_visible.get() && update_available.load(Ordering::SeqCst));
+			});
+		}
 
 		window.set_root(root_container);
 
 		let check_updates_enabled =
-				config.borrow().updates.as_ref().map(|u| u.check_updates).unwrap_or(true);
+			config.borrow().updates.as_ref().map(|u| u.check_updates).unwrap_or(true);
 
 		let update_checker_join_handle = {
-				let updates = &mut cache.lock().unwrap().updates;
-				let cache = cache.clone();
-				let update_available = self.update_available.clone();
-				let update_check_done = self.update_check_done.clone();
+			let updates = &mut cache.lock().unwrap().updates;
+			let cache = cache.clone();
+			let update_available = self.update_available.clone();
+			let update_check_done = self.update_check_done.clone();
 
-				if check_updates_enabled && updates.update_check_needed() {
-					// kick off a thread that will check for an update in the background
-					Some(std::thread::spawn(move || {
-						let has_update = update::check_for_updates();
-						update_available.store(has_update, Ordering::SeqCst);
-						update_check_done.store(true, Ordering::SeqCst);
-						if !has_update {
-							cache.lock().unwrap().updates.set_update_check_time();
-						}
-					}))
-				} else {
-					None
-				}
-			};
+			if check_updates_enabled && updates.update_check_needed() {
+				// kick off a thread that will check for an update in the background
+				Some(std::thread::spawn(move || {
+					let has_update = update::check_for_updates();
+					update_available.store(has_update, Ordering::SeqCst);
+					update_check_done.store(true, Ordering::SeqCst);
+					if !has_update {
+						cache.lock().unwrap().updates.set_update_check_time();
+					}
+				}))
+			} else {
+				None
+			}
+		};
 
-		self.ui_elements = Some(UiElements {
-			set_theme,
-			update_label,
-			update_notification,
-			help_screen,
-		});
+		self.ui_elements =
+			Some(UiElements { set_theme, update_notification, help_screen });
 
 		update_checker_join_handle
 	}
@@ -365,14 +367,21 @@ impl AppHandler {
 
 impl ApplicationHandler for AppHandler {
 	fn handle_can_create_surface(&mut self, event_loop: &mut ActiveEventLoop) {
-		self.update_checker_join_handle = self.create_window(event_loop, self.args.clone(),
+		self.update_checker_join_handle = self.create_window(
+			event_loop,
+			self.args.clone(),
 			self.first_launch,
 			self.cache.clone(),
 			self.config.clone(),
 		);
 	}
-	
-	fn handle_window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: gelatin::winit::window::WindowId, _event: &WindowEvent) -> NextUpdate {
+
+	fn handle_window_event(
+		&mut self,
+		_event_loop: &ActiveEventLoop,
+		_window_id: gelatin::winit::window::WindowId,
+		_event: &WindowEvent,
+	) -> NextUpdate {
 		if self.update_presented {
 			return NextUpdate::Latest;
 		}
@@ -387,7 +396,7 @@ impl ApplicationHandler for AppHandler {
 		}
 		NextUpdate::WaitUntil(Instant::now() + Duration::from_secs(1))
 	}
-	
+
 	fn exiting(&mut self) {
 		self.cache.lock().unwrap().save(&self.cache_path).unwrap();
 		if let Some(h) = self.update_checker_join_handle.take() {
